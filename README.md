@@ -23,7 +23,7 @@ A small desktop application for creating and managing Discord Rich Presence prof
 ## Installation
 
 1. **Clone the repository**  
-   ```bash
+   bash
    git clone https://github.com/<your-username>/discord-presence-gui.git
    cd discord-presence-gui
 ````
@@ -108,9 +108,7 @@ Resulting binary will appear in `dist/presence_app.exe`.
 
   * Drag-and-drop image picker
   * Scheduler / Timers
-  * Live preview of your presence
   * Advanced theme customization
-  * Cross-platform installers
 
 ---
 
