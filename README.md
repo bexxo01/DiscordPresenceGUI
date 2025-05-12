@@ -1,5 +1,6 @@
 ````markdown
 # Discord Rich Presence GUI
+  
 
 **Version**: 0.2.0 (Work in Progress)
 
@@ -111,6 +112,9 @@ Resulting binary will appear in `dist/presence_app.exe`.
 Feel free to open issues or pull requests! This project is a work in progress—any help improving stability, fixing bugs, or adding features is welcome.
 
 ---
+
+## Disclaimer:
+README was written by AI cause i'm lazy :)
 
 ## License
 
