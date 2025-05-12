@@ -25,7 +25,7 @@ A small desktop application for creating and managing Discord Rich Presence prof
 
 1. **Clone the repository**  
    bash
-   git clone https://github.com/bexxo01/discord-presence-gui.git
+   git clone https://github.com/bexxo01/DiscordPresenceGUI.git
    cd discord-presence-gui
 ````
 
