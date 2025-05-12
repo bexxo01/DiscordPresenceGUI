@@ -17,6 +17,7 @@ A small desktop application for creating and managing Discord Rich Presence prof
 - **Light / Dark Theme**: Toggle between two color schemes.  
 - **Work in Progress**: The code is under active development; some UI bindings or code paths may still contain bugs.
 - If you want a more stable version you should use **Version**: 0.1.0 (still using old GUI)
+- Also please note that this is actually only my second project and I still need to learn alot^^
 
 ---
 
