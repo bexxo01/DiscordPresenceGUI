@@ -1,45 +1,31 @@
 #!/usr/bin/env python3
-import threading
-import time
-import json
-import os
-import tkinter as tk
-from tkinter import ttk, messagebox, simpledialog
-from pypresence import Presence
+import sys, os, time, threading, json
 from dotenv import load_dotenv
+from PySide6 import QtWidgets
+from ui_main import Ui_MainWindow
+from pypresence import Presence
 
+# Load environment variables
 load_dotenv()
-
-DISCORD_TOKEN = os.getenv("DISCORD_TOKEN")
-CLIENT_ID     = os.getenv("CLIENT_ID")
-
+DEFAULT_CLIENT_ID = os.getenv("CLIENT_ID")
 CONFIG_FILE = "config.json"
 __version__ = "0.1.0"
 
-
+# Theme definitions
 themes = {
-    "light": {
-        "bg": "#f0f0f0",
-        "fg": "#000000",
-        "entry_bg": "#ffffff"
-    },
-    "dark": {
-        "bg": "#2e2e2e",
-        "fg": "#ffffff",
-        "entry_bg": "#4a4a4a"
-    }
+    "light": {"bg": "#f0f0f0", "fg": "#000000", "entry_bg": "#ffffff"},
+    "dark":  {"bg": "#2e2e2e", "fg": "#ffffff", "entry_bg": "#4a4a4a"}
 }
 
-
 class RPCThread(threading.Thread):
-    def __init__(self, client_id, presence_data, update_interval, error_callback):
+    def __init__(self, client_id, data, interval, error_callback):
         super().__init__(daemon=True)
         self.client_id = client_id
-        self.presence_data = presence_data
-        self.update_interval = update_interval
-        self.rpc = None
-        self.running = False
+        self.data = data
+        self.interval = interval
         self.error_callback = error_callback
+        self.running = False
+        self.rpc = None
 
     def run(self):
         try:
@@ -47,15 +33,15 @@ class RPCThread(threading.Thread):
             self.rpc.connect()
             while self.running:
                 try:
-                    self.rpc.update(**self.presence_data)
+                    self.rpc.update(**self.data)
                 except Exception as e:
                     self.error_callback(f"Error updating presence: {e}")
                     break
-                time.sleep(self.update_interval)
+                time.sleep(self.interval)
             if self.rpc:
                 self.rpc.clear()
         except Exception as e:
-            self.error_callback(f"Error connecting to Discord: {e}")
+            self.error_callback(f"Connection error: {e}")
         finally:
             if self.rpc:
                 self.rpc.close()
@@ -68,319 +54,166 @@ class RPCThread(threading.Thread):
     def stop_presence(self):
         self.running = False
 
-
-class PresenceApp(tk.Tk):
+class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
-        self.title("Discord Rich Presence Controller")
-        self.configure(padx=10, pady=10)
+        # Setup UI
+        self.ui = Ui_MainWindow()
+        self.ui.setupUi(self)
+
+        # Internal state
         self.rpc_thread = None
         self.profiles = {}
-        self.current_profile = None
         self.current_theme = "light"
+        self.apply_theme()
 
-        # Styling
-        self.style = ttk.Style(self)
-        self.style.theme_use('clam')
-        self.apply_theme(self.current_theme)
+        # Connect signals
+        self.ui.newProfileButton.clicked.connect(self.new_profile)
+        self.ui.copyProfileButton.clicked.connect(self.copy_profile)
+        self.ui.deleteProfileButton.clicked.connect(self.delete_profile)
+        self.ui.saveProfileButton.clicked.connect(self.save_profile)
+        self.ui.startButton.clicked.connect(self.on_start)
+        self.ui.stopButton.clicked.connect(self.on_stop)
+        self.ui.themeButton.clicked.connect(self.toggle_theme)
+        self.ui.exitButton.clicked.connect(self.close)
 
-        # Build UI
-        self.build_profile_ui()
-        self.build_config_ui()
-        self.build_control_ui()
-
-        # Load saved profiles/config
+        # Load saved config
         self.load_config()
 
-        # Handle window close
-        self.protocol("WM_DELETE_WINDOW", self.on_exit)
-
-    def apply_theme(self, name):
-        t = themes[name]
-        self.configure(bg=t['bg'])
-        self.style.configure('.', background=t['bg'], foreground=t['fg'])
-        self.style.configure('TEntry', fieldbackground=t['entry_bg'], foreground=t['fg'])
-        self.option_add('*Background', t['bg'])
-        self.option_add('*Foreground', t['fg'])
-        self.option_add('*Entry.Background', t['entry_bg'])
-        self.option_add('*Entry.Foreground', t['fg'])
+    def apply_theme(self):
+        t = themes[self.current_theme]
+        # Set background and text color
+        self.ui.centralwidget.setStyleSheet(f"background:{t['bg']}; color:{t['fg']};")
+        # Style entries
+        entry_style = f"background:{t['entry_bg']}; color:{t['fg']};"
+        for widget in [
+            self.ui.clientIdEdit, self.ui.stateEdit, self.ui.detailsEdit,
+            self.ui.largeImageEdit, self.ui.largeTextEdit,
+            self.ui.smallImageEdit, self.ui.smallTextEdit
+        ]:
+            widget.setStyleSheet(entry_style)
+        # Update theme button text
+        self.ui.themeButton.setText("Dark Mode" if self.current_theme == "light" else "Light Mode")
 
     def toggle_theme(self):
-        self.current_theme = 'dark' if self.current_theme == 'light' else 'light'
-        self.apply_theme(self.current_theme)
-        btn_text = 'Light Mode' if self.current_theme == 'dark' else 'Dark Mode'
-        self.theme_btn.config(text=btn_text)
-
-    def build_profile_ui(self):
-        prof_frame = ttk.LabelFrame(self, text="Profiles", padding=5)
-        prof_frame.grid(row=0, column=0, sticky="ew", pady=(0,10))
-        self.profile_var = tk.StringVar()
-        self.profile_cb = ttk.Combobox(prof_frame, textvariable=self.profile_var,
-                                       state="readonly", width=30)
-        self.profile_cb.grid(row=0, column=0, padx=5)
-        self.profile_cb.bind("<<ComboboxSelected>>", lambda e: self.on_profile_select())
-        ttk.Button(prof_frame, text="New", command=self.new_profile).grid(row=0, column=1, padx=2)
-        ttk.Button(prof_frame, text="Copy", command=self.copy_profile).grid(row=0, column=2, padx=2)
-        ttk.Button(prof_frame, text="Delete", command=self.delete_profile).grid(row=0, column=3, padx=2)
+        self.current_theme = "dark" if self.current_theme == "light" else "light"
+        self.apply_theme()
 
     def new_profile(self):
-        name = simpledialog.askstring("New Profile", "Enter new profile name:")
-        if name:
+        name, ok = QtWidgets.QInputDialog.getText(self, "New Profile", "Enter profile name:")
+        if ok and name:
             if name in self.profiles:
-                messagebox.showerror("Error", "Profile already exists.")
+                QtWidgets.QMessageBox.warning(self, "Error", "Profile already exists.")
             else:
-                self.profiles[name] = {
-                    "client_id": "",
-                    "presence_data": {},
-                    "update_interval": 15
-                }
-                self.refresh_profiles()
-                self.profile_var.set(name)
+                self.profiles[name] = {"client_id":"", "presence_data":{}, "update_interval":15}
+                self.ui.profileComboBox.addItem(name)
+                self.ui.profileComboBox.setCurrentText(name)
                 self.load_profile(name)
 
     def copy_profile(self):
-        src = self.profile_var.get()
-        if not src:
-            return
-        name = simpledialog.askstring("Copy Profile", f"Enter name for copy of '{src}':")
-        if name:
+        src = self.ui.profileComboBox.currentText()
+        if not src: return
+        name, ok = QtWidgets.QInputDialog.getText(self, "Copy Profile", f"Name for copy of '{src}':")
+        if ok and name:
             if name in self.profiles:
-                messagebox.showerror("Error", "Profile already exists.")
+                QtWidgets.QMessageBox.warning(self, "Error", "Profile already exists.")
             else:
                 cfg = self.profiles[src]
-                # deep copy
                 self.profiles[name] = {
                     "client_id": cfg["client_id"],
                     "presence_data": dict(cfg["presence_data"]),
                     "update_interval": cfg["update_interval"]
                 }
-                self.refresh_profiles()
-                self.profile_var.set(name)
+                self.ui.profileComboBox.addItem(name)
+                self.ui.profileComboBox.setCurrentText(name)
                 self.load_profile(name)
 
     def delete_profile(self):
-        name = self.profile_var.get()
-        if not name:
-            return
-        if messagebox.askyesno("Delete", f"Delete profile '{name}'?"):
-            del self.profiles[name]
-            self.refresh_profiles()
+        name = self.ui.profileComboBox.currentText()
+        if not name: return
+        if QtWidgets.QMessageBox.question(self, "Delete", f"Delete profile '{name}'?") == QtWidgets.QMessageBox.Yes:
+            self.profiles.pop(name, None)
+            idx = self.ui.profileComboBox.currentIndex()
+            self.ui.profileComboBox.removeItem(idx)
             if self.profiles:
-                new = next(iter(self.profiles))
-                self.profile_var.set(new)
-                self.load_profile(new)
-            else:
-                self.current_profile = None
-                self.clear_fields()
-
-    def refresh_profiles(self):
-        names = list(self.profiles.keys())
-        self.profile_cb['values'] = names
-
-    def on_profile_select(self):
-        name = self.profile_var.get()
-        if name:
-            self.load_profile(name)
+                first = next(iter(self.profiles))
+                self.ui.profileComboBox.setCurrentText(first)
+                self.load_profile(first)
 
     def load_profile(self, name):
-        self.current_profile = name
-        cfg = self.profiles.get(name, {})
-        self.client_id_var.set(cfg.get("client_id", ""))
-        pdata = cfg.get("presence_data", {})
-        self.state_var.set(pdata.get("state", ""))
-        self.details_var.set(pdata.get("details", ""))
-        self.large_image_var.set(pdata.get("large_image", ""))
-        self.large_text_var.set(pdata.get("large_text", ""))
-        self.small_image_var.set(pdata.get("small_image", ""))
-        self.small_text_var.set(pdata.get("small_text", ""))
-        for i, (lbl_var, url_var) in enumerate(self.btn_vars):
-            btns = pdata.get("buttons", [])
-            if i < len(btns):
-                lbl_var.set(btns[i]["label"])
-                url_var.set(btns[i]["url"])
-            else:
-                lbl_var.set("")
-                url_var.set("")
-        self.interval_var.set(cfg.get("update_interval", 15))
+        cfg = self.profiles[name]
+        self.ui.clientIdEdit.setText(cfg.get("client_id", ""))
+        pd = cfg.get("presence_data", {})
+        self.ui.stateEdit.setText(pd.get("state", ""))
+        self.ui.detailsEdit.setText(pd.get("details", ""))
+        self.ui.largeImageEdit.setText(pd.get("large_image", ""))
+        self.ui.largeTextEdit.setText(pd.get("large_text", ""))
+        self.ui.smallImageEdit.setText(pd.get("small_image", ""))
+        self.ui.smallTextEdit.setText(pd.get("small_text", ""))
+        self.ui.intervalSpinBox.setValue(cfg.get("update_interval", 15))
 
-    def clear_fields(self):
-        for var in [self.client_id_var, self.state_var, self.details_var,
-                    self.large_image_var, self.large_text_var,
-                    self.small_image_var, self.small_text_var]:
-            var.set("")
-        for lbl_var, url_var in self.btn_vars:
-            lbl_var.set("")
-            url_var.set("")
-        self.interval_var.set(15)
-
-    def build_config_ui(self):
-        cfg = ttk.LabelFrame(self, text="Configuration", padding=10)
-        cfg.grid(row=1, column=0, sticky="ew")
-        labels = [
-            ("Client ID *", 'client_id_var'),
-            ("State", 'state_var'),
-            ("Details", 'details_var'),
-            ("Large Image Key", 'large_image_var'),
-            ("Large Text", 'large_text_var'),
-            ("Small Image Key", 'small_image_var'),
-            ("Small Text", 'small_text_var'),
-        ]
-        for i, (text, varname) in enumerate(labels):
-            ttk.Label(cfg, text=text+":").grid(row=i, column=0, sticky="w", pady=2)
-            setattr(self, varname, tk.StringVar())
-            ttk.Entry(cfg, textvariable=getattr(self, varname), width=40).grid(
-                row=i, column=1, pady=2)
-
-        btn_frame = ttk.LabelFrame(cfg, text="Buttons (max 2)", padding=5)
-        btn_frame.grid(row=len(labels), column=0, columnspan=2, pady=10, sticky="ew")
-        self.btn_vars = []
-        for i in range(2):
-            lbl_var = tk.StringVar()
-            url_var = tk.StringVar()
-            self.btn_vars.append((lbl_var, url_var))
-            ttk.Entry(btn_frame, textvariable=lbl_var, width=15).grid(row=i, column=0, padx=5)
-            ttk.Entry(btn_frame, textvariable=url_var, width=30).grid(row=i, column=1, padx=5)
-
-        ttk.Label(cfg, text="Update Interval (s):").grid(
-            row=len(labels)+1, column=0, sticky="w")
-        self.interval_var = tk.IntVar(value=15)
-        ttk.Spinbox(cfg, from_=5, to=3600, textvariable=self.interval_var,
-                    width=5).grid(row=len(labels)+1, column=1, sticky="w")
-        ttk.Button(cfg, text="Save profile", command=self.save_config).grid(
-            row=len(labels)+2, column=0, columnspan=2, pady=10)
-
-    def build_control_ui(self):
-        ctl = ttk.Frame(self, padding=10)
-        ctl.grid(row=2, column=0, sticky="ew")
-        ttk.Label(ctl, text="Status:").grid(row=0, column=0, sticky="w")
-        self.status_var = tk.StringVar(value="Stopped")
-        ttk.Label(ctl, textvariable=self.status_var,
-                  font=("Arial",12,"bold")).grid(row=0,column=1,padx=(5,20))
-
-        self.start_btn = ttk.Button(ctl, text="▶ Start", command=self.start_presence)
-        self.start_btn.grid(row=0, column=2, padx=5)
-
-        self.stop_btn = ttk.Button(ctl, text="■ Stop", command=self.stop_presence, state="disabled")
-        self.stop_btn.grid(row=0, column=3, padx=5)
-
-        self.theme_btn = ttk.Button(ctl, text="Dark Mode", command=self.toggle_theme)
-        self.theme_btn.grid(row=0, column=4, padx=5)
-
-        self.exit_btn = ttk.Button(ctl, text="✖ Exit", command=self.on_exit)
-        self.exit_btn.grid(row=0, column=5, padx=5)
-
-    def gather_config(self):
-        client_id = self.client_id_var.get().strip()
+    def save_profile(self):
+        name = self.ui.profileComboBox.currentText()
+        cid = self.ui.clientIdEdit.text().strip() or DEFAULT_CLIENT_ID
         data = {}
-        for key, var in [
-            ("state", self.state_var),
-            ("details", self.details_var),
-            ("large_image", self.large_image_var),
-            ("large_text", self.large_text_var),
-            ("small_image", self.small_image_var),
-            ("small_text", self.small_text_var),
+        for key, widget in [
+            ("state", self.ui.stateEdit), ("details", self.ui.detailsEdit),
+            ("large_image", self.ui.largeImageEdit), ("large_text", self.ui.largeTextEdit),
+            ("small_image", self.ui.smallImageEdit), ("small_text", self.ui.smallTextEdit)
         ]:
-            val = var.get().strip()
-            if val:
-                data[key] = val
+            v = widget.text().strip()
+            if v: data[key] = v
         data["start"] = int(time.time())
-        buttons = []
-        for lbl_var, url_var in self.btn_vars:
-            lbl = lbl_var.get().strip()
-            url = url_var.get().strip()
-            if lbl and url:
-                buttons.append({"label": lbl, "url": url})
-        if buttons:
-            data["buttons"] = buttons
-        interval = self.interval_var.get()
-        return client_id, data, interval
-
-    def validate_config(self, client_id, data):
-        if not client_id:
-            messagebox.showerror("Error", "Client ID required.")
-            return False
-        if not data.get("state") and not data.get("details"):
-            messagebox.showerror("Error", "Enter State or Details.")
-            return False
-        return True
-
-    def start_presence(self):
-        if self.rpc_thread and self.rpc_thread.running:
-            self.show_error("Already running.")
-            return
-        name = self.profile_var.get()
-        client_id, data, interval = self.gather_config()
-        if not self.validate_config(client_id, data):
-            return
-        # Update in-memory profile
-        self.profiles[name] = {
-            "client_id": client_id,
-            "presence_data": data,
-            "update_interval": interval
-        }
-        self.save_all_config()
-
-        # Start thread
-        self.rpc_thread = RPCThread(client_id, data, interval, self.show_error)
-        self.rpc_thread.start_presence()
-        self.status_var.set("Running")
-        self.start_btn.config(state="disabled")
-        self.stop_btn.config(state="normal")
-
-    def stop_presence(self):
-        if self.rpc_thread:
-            self.rpc_thread.stop_presence()
-        self.status_var.set("Stopped")
-        self.start_btn.config(state="normal")
-        self.stop_btn.config(state="disabled")
-
-    def save_config(self):
-        name = self.profile_var.get()
-        client_id, data, interval = self.gather_config()
-        self.profiles[name] = {
-            "client_id": client_id,
-            "presence_data": data,
-            "update_interval": interval
-        }
-        self.save_all_config()
-        messagebox.showinfo("Saved", "Profile saved.")
-        # Dynamically update presence_data if running
-        if self.rpc_thread and self.rpc_thread.running:
-            self.rpc_thread.presence_data = data
-
-    def save_all_config(self):
-        data = {
-            "profiles": self.profiles,
-            "last_profile": self.profile_var.get()
-        }
+        interval = self.ui.intervalSpinBox.value()
+        self.profiles[name] = {"client_id": cid, "presence_data": data, "update_interval": interval}
         with open(CONFIG_FILE, "w") as f:
-            json.dump(data, f, indent=4)
+            json.dump({"profiles": self.profiles, "last": name}, f, indent=4)
+        QtWidgets.QMessageBox.information(self, "Saved", "Profile saved.")
+        if self.rpc_thread and self.rpc_thread.running:
+            self.rpc_thread.data = data
 
     def load_config(self):
         if os.path.isfile(CONFIG_FILE):
             with open(CONFIG_FILE) as f:
                 cfg = json.load(f)
             self.profiles = cfg.get("profiles", {})
-            self.refresh_profiles()
-            last = cfg.get("last_profile")
+            for name in self.profiles:
+                self.ui.profileComboBox.addItem(name)
+            last = cfg.get("last")
             if last in self.profiles:
-                self.profile_var.set(last)
+                self.ui.profileComboBox.setCurrentText(last)
                 self.load_profile(last)
-            elif self.profiles:
-                first = next(iter(self.profiles))
-                self.profile_var.set(first)
-                self.load_profile(first)
 
-    def show_error(self, message):
-        messagebox.showerror("RPC Error", message)
-
-    def on_exit(self):
+    def on_start(self):
         if self.rpc_thread and self.rpc_thread.running:
-            self.rpc_thread.stop_presence()
-        self.destroy()
+            return
+        name = self.ui.profileComboBox.currentText()
+        cid = self.ui.clientIdEdit.text().strip() or DEFAULT_CLIENT_ID
+        data = {}
+        for key, widget in [("state", self.ui.stateEdit), ("details", self.ui.detailsEdit)]:
+            v = widget.text().strip()
+            if v: data[key] = v
+        data["start"] = int(time.time())
+        interval = self.ui.intervalSpinBox.value()
+        self.rpc_thread = RPCThread(cid, data, interval, self.show_error)
+        self.rpc_thread.start_presence()
+        self.ui.statusLabel.setText("Running")
+        self.ui.startButton.setEnabled(False)
+        self.ui.stopButton.setEnabled(True)
 
+    def on_stop(self):
+        if self.rpc_thread:
+            self.rpc_thread.stop_presence()
+        self.ui.statusLabel.setText("Stopped")
+        self.ui.startButton.setEnabled(True)
+        self.ui.stopButton.setEnabled(False)
+
+    def show_error(self, msg):
+        QtWidgets.QMessageBox.critical(self, "RPC Error", msg)
 
 if __name__ == "__main__":
-    app = PresenceApp()
-    app.mainloop()
+    app = QtWidgets.QApplication(sys.argv)
+    w = MainWindow()
+    w.show()
+    sys.exit(app.exec())
 
