@@ -5,6 +5,9 @@
 **Version**: 0.2.0 (Work in Progress)
   Update: I have decided not to continue with this project as it became boring quite quickly but I will still release V0.3.0 soon.
           This version will be the last update but it will have good looking GUI and all of the features that I listed will work as intended.
+last update: So because my adhd was really kicking in I actually went into flow zone and completly reworked this whole project 
+             with the help of ChatGPT and Cursor. I'll post everything as a seperate project soon :)
+            
            
 
 A small desktop application for creating and managing Discord Rich Presence profiles via a graphical interface. Built with Python 3.13, PySide6 (Qt for Python) and pypresence, it lets you define multiple “profiles” of presence data, start/stop updates, switch themes, and save/load your settings to JSON.
